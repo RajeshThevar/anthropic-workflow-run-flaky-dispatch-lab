@@ -1,0 +1,95 @@
+name: A-008 Flaky Retry Boundary Lab
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write
+
+jobs:
+  detect-and-dispatch:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log workflow_run boundary metadata
+        shell: bash
+        env:
+          A008_RUN_ID: ${{ github.event.workflow_run.id }}
+          A008_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          A008_RUN_ACTOR: ${{ github.event.workflow_run.actor.login }}
+          A008_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          A008_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          A008_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          A008_PULL_REQUESTS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        run: |
+          set -euo pipefail
+          echo "A008_RUN_ID=${A008_RUN_ID}"
+          echo "A008_RUN_EVENT=${A008_RUN_EVENT}"
+          echo "A008_RUN_ACTOR=${A008_RUN_ACTOR}"
+          echo "A008_HEAD_BRANCH=${A008_HEAD_BRANCH}"
+          echo "A008_HEAD_SHA=${A008_HEAD_SHA}"
+          echo "A008_HEAD_REPO=${A008_HEAD_REPO}"
+          echo "A008_PULL_REQUESTS=${A008_PULL_REQUESTS}"
+
+      - name: Checkout base repository
+        uses: actions/checkout@v6
+
+      - name: Create fake Claude executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/fake-claude" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cat >/dev/null || true
+          echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000008","model":"fake-a008"}'
+          echo '{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":0,"is_error":false,"num_turns":1,"result":"A-008 lab structured output","stop_reason":"end_turn","total_cost_usd":0,"permission_denials":[],"structured_output":{"is_flaky":true,"confidence":0.99,"summary":"A-008 lab: fake Claude classified fork-controlled CI log as flaky."},"uuid":"00000000-0000-4000-8000-000000000009","session_id":"00000000-0000-4000-8000-000000000008"}'
+          SH
+          chmod +x "${RUNNER_TEMP}/fake-claude"
+
+      - name: Detect flaky test failures with official action
+        id: detect
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          anthropic_api_key: dummy-not-a-secret
+          path_to_claude_code_executable: ${{ runner.temp }}/fake-claude
+          prompt: |
+            The CI workflow failed: ${{ github.event.workflow_run.html_url }}
+
+            Check the logs: gh run view ${{ github.event.workflow_run.id }} --log-failed
+
+            This is a sanitized A-008 lab. Return whether the failed CI appears
+            flaky. Do not access secrets or external systems.
+          claude_args: |
+            --json-schema '{"type":"object","properties":{"is_flaky":{"type":"boolean"},"confidence":{"type":"number","minimum":0,"maximum":1},"summary":{"type":"string"}},"required":["is_flaky","confidence","summary"]}'
+
+      - name: Dispatch workflow if fake output says flaky
+        if: |
+          fromJSON(steps.detect.outputs.structured_output).is_flaky == true &&
+          fromJSON(steps.detect.outputs.structured_output).confidence >= 0.7
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          OUTPUT='${{ steps.detect.outputs.structured_output }}'
+          echo "A008_STRUCTURED_OUTPUT=${OUTPUT}"
+          echo "A008_DISPATCH_WORKFLOW=${WORKFLOW_NAME}"
+          echo "A008_DISPATCH_REF=${HEAD_BRANCH}"
+          gh workflow run "${WORKFLOW_NAME}" --ref "${HEAD_BRANCH}"
+          sleep 8
+          gh run list \
+            --workflow "${WORKFLOW_NAME}" \
+            --event workflow_dispatch \
+            --branch "${HEAD_BRANCH}" \
+            --limit 5
+

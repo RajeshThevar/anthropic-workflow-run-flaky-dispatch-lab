@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Print safe marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "A008_CI_EVENT=${GITHUB_EVENT_NAME}"
+          echo "A008_CI_REF=${GITHUB_REF}"
+          echo "A008_CI_SHA=${GITHUB_SHA}"
+          if [ -f attack-marker.txt ]; then
+            echo "A008_ATTACK_MARKER_BEGIN"
+            cat attack-marker.txt
+            echo "A008_ATTACK_MARKER_END"
+          fi
+
+      - name: Fail only for pull request CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            echo "A008_FAIL_MARKER=failed-by-pr-ci"
+            exit 1
+          fi
+          echo "A008_WORKFLOW_DISPATCH_MARKER=base-ci-dispatched"
+
