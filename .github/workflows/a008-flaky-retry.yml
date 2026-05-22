@@ -47,7 +47,6 @@ jobs:
           cat > "${RUNNER_TEMP}/fake-claude" <<'SH'
           #!/usr/bin/env bash
           set -euo pipefail
-          cat >/dev/null || true
           echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000008","model":"fake-a008"}'
           echo '{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":0,"is_error":false,"num_turns":1,"result":"A-008 lab structured output","stop_reason":"end_turn","total_cost_usd":0,"permission_denials":[],"structured_output":{"is_flaky":true,"confidence":0.99,"summary":"A-008 lab: fake Claude classified fork-controlled CI log as flaky."},"uuid":"00000000-0000-4000-8000-000000000009","session_id":"00000000-0000-4000-8000-000000000008"}'
           SH
@@ -92,4 +91,3 @@ jobs:
             --event workflow_dispatch \
             --branch "${HEAD_BRANCH}" \
             --limit 5
-
